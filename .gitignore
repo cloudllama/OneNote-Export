@@ -1,0 +1,18 @@
+
+vector_db/
+
+export-dir/
+
+Sample OneNote/
+
+.env
+
+.idea/
+
+*.pem
+
+tryme.py
+
+.oci/
+
+*.onetoc2
