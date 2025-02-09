@@ -403,22 +403,28 @@ function Convert-Page {
 
     } ElseIf ($PageNode.Name -eq "one:Image"){
 
-        $Paragraph = "{Image: ""$($PageNode.alt)""}`n"
+        # Only include the alt text of the image if it is available.
+        If ($PageNode.alt){
+            $Paragraph = "{Image: ""$($PageNode.alt)""}`n"
+        }
         
     } ElseIf ($PageNode.Name -eq "one:InsertedFile" ) {
 
-        $Paragraph = "{File: ""$($PageNode.preferredName)"""
-        If ($PageNode.pathSource) {
-            $Paragraph += ", originally located at ""$($PageNode.pathSource)"""
-        }
-        $Paragraph += "}`n"
+        # Only include the file name and the original location of the file if they are available.
+        If ($PageNode.preferredName){
+            $Paragraph = "{File: ""$($PageNode.preferredName)"""
+            If ($PageNode.pathSource) {
+                $Paragraph += ", originally located at ""$($PageNode.pathSource)"""
+            }
+            $Paragraph += "}`n"
 
-        If ( [System.Io.Path]::GetExtension($PageNode.preferredName) -eq ".msg" ){
-            # Email message
-            If (Test-Path $PageNode.pathCache) {
-                $EmailMessage = Get-Email -emailFilePath $PageNode.pathCache -spacingLeader "    "
-                If ($EmailMessage) {
-                    $Paragraph += $EmailMessage
+            If ( [System.Io.Path]::GetExtension($PageNode.preferredName) -eq ".msg" ){
+                # Email message
+                If (Test-Path $PageNode.pathCache) {
+                    $EmailMessage = Get-Email -emailFilePath $PageNode.pathCache -spacingLeader "    "
+                    If ($EmailMessage) {
+                        $Paragraph += $EmailMessage
+                    }
                 }
             }
         }
