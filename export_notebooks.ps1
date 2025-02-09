@@ -838,8 +838,11 @@ ForEach($Notebook in $NotebooksXML.Notebooks.Notebook)
             [xml]$PageXML = ""
             $OneNoteApp.GetPageContent($Page.ID, [ref]$PageXML, [Microsoft.Office.Interop.OneNote.PageInfo]::piBasic, $OneNoteVersion)
             Write-Log "DEBUG" "Got the content of the page: `"$($Page.Name)`""
-
+            
             $DelimiterPrinted = $False
+
+            # It is possible that a page is empty, but even empty pages still have a defined style
+            # for the page title. This is a good check for the validity of the page.
 
             # The styles can be uniquely defined for each page. Styles are
             # defined in the order that they are first used on the page. So,
@@ -867,102 +870,104 @@ ForEach($Notebook in $NotebooksXML.Notebooks.Notebook)
                 Write-Output " "
             }    
 
-            # Tags are optional. There might not be any on the page.
-            Write-Log "DEBUG" "Finding the tags of the page: `"$($Page.Name)`""
-            $Tags = @{}
-            $Tags = Get-Tags $PageXML.DocumentElement
-            Write-Log "DEBUG" "Found the tags of the page: `"$($Page.Name)`""
-            
-            If ($PrintTags){
-                If (!($DelimiterPrinted)){
-                    Write-Output " "
-                    Write-Output "--------"
-                    $DelimiterPrinted=$True
-                }
-                Write-Output "  + Tags"
-                ForEach( $Key in $Tags.Keys) {
-                    Write-Output "    - $($Key): $($Tags[$Key])"
-                }
-                Write-Output " "
-            }     
- 
-            # TODO
-            # Do something with the tags. For now, we just have the code 
-            # that collects them.
-            
             # Start at the beginning of the content, which is the first Outline node. There
             # can be multiple Outline nodes, but we're only interested in the first one.
             Write-Log "DEBUG" "Finding the first outline node of the page: `"$($Page.Name)`""
             [System.Xml.XmlElement]$OneNoteOutline = Find-OneNoteOutline $PageXML.DocumentElement 6
-            If (!($OneNoteOutline)){
-                Write-Log "ERROR" "Could not find the first outline node of the page: `"$($Page.Name)`""
-                Exit 1
-            }
-            Write-Log "DEBUG" "Found the first outline node of the page: `"$($Page.Name)`""
-            $DelimiterPrinted = $False
             
-            If (($PrintSnippet) -or ($PrintPage)){
-                If (!($DelimiterPrinted)){
-                    Write-Output " "
+            If (!($OneNoteOutline)){
+                Write-Log "INFO" "Could not find the first outline node of the page: `"$($Page.Name)`". The page is considered empty and will be ignored."
+            } Else {
+                Write-Log "DEBUG" "Found the first outline node of the page: `"$($Page.Name)`""
+                
+                # Tags are optional. There might not be any on the page.
+                # It's possible that a page is empty and it's not an error to check for tags, but an
+                # empty page will never have tags so we don't check unless the page has some
+                # content. This is a performance optimization.
+                Write-Log "DEBUG" "Finding the tags of the page: `"$($Page.Name)`""
+                $Tags = @{}
+                $Tags = Get-Tags $PageXML.DocumentElement
+                Write-Log "DEBUG" "Found the tags of the page: `"$($Page.Name)`""
+                
+                If ($PrintTags){
+                    If ($Tags.Keys.Count -gt 0){
+                        If (!($DelimiterPrinted)){
+                            Write-Output " "
+                            Write-Output "--------"
+                            $DelimiterPrinted=$True
+                        }
+                        Write-Output "  + Tags"
+                        ForEach( $Key in $Tags.Keys) {
+                            Write-Output "    - $($Key): $($Tags[$Key])"
+                        }
+                        Write-Output " "
+                    }
+                }     
+     
+                
+                If (($PrintSnippet) -or ($PrintPage)){
+                    If (!($DelimiterPrinted)){
+                        Write-Output " "
+                        Write-Output "--------"
+                        $DelimiterPrinted=$True
+                    }
+                }
+                    
+                # Convert the page to markdown
+                Write-Log "DEBUG" "Converting the page from XML: `"$($Page.Name)`""
+                $ConvertResult = Convert-Page $Page.Name $Page.id $OneNoteOutline $PageStyles ""
+                Write-Log "DEBUG" "Converted the page from XML: `"$($Page.Name)`""
+
+                # Split the page into individual paragraphs and then
+                # write them to individual files.
+                Write-Log "DEBUG" "Splitting the page into paragraphs: `"$($Page.Name)`""
+                $PageParagraphs = Split-Pages -PageMarkdown $ConvertResult.Paragraph -PageName $Page.Name
+                Write-Log "DEBUG" "Split the page into paragraphs: `"$($Page.Name)`""
+
+                ForEach ($PageParagraph in $PageParagraphs.Keys){
+                    If ($PrintStructure.IsPresent) {
+                        Write-Output "    * Paragraph Name: ""$($PageParagraph)"""
+                    }
+
+                    If ($PrintPage){
+                        If (!($DelimiterPrinted)){
+                            Write-Output " "
+                            Write-Output "--------"
+                            $DelimiterPrinted=$True
+                        }
+                        Write-Output("$($PageParagraphs[$PageParagraph])")
+                    } ElseIf ($PrintSnippet){
+                        If (!($DelimiterPrinted)){
+                            Write-Output " "
+                            Write-Output "--------"
+                            $DelimiterPrinted=$True
+                        }
+
+                        #Write-Output($($PageParagraphs[$PageParagraph]) -split "`n" | Select-Object -First 3)
+                        $Snippet = $($PageParagraphs[$PageParagraph]).Substring(0, [Math]::Min($($PageParagraphs[$PageParagraph]).Length, 100))
+                        If ($Snippet.Length -eq 100){
+                            $Snippet += "..."
+                        }
+                        Write-Output($Snippet)
+                    }
+
+                    $CleansedPageParagraph = $PageParagraph -replace $ILLEGAL_CHARACTERS, "_"
+                    If ($CleansedPageParagraph -ne $PageParagraph){
+                        Write-Log "INFO" "The paragraph name `"$($PageParagraph)`" contains illegal characters. It has been changed to `"$($CleansedPageParagraph)`"."
+                    }
+                    
+                    If (($ExportAll) -or (($ExportSelected) -and ($Page.Name -eq $ExportedSelected))){
+                        # ONE-2
+                        # Remove illegal characters from the paragraph name, which will then be the file name.
+                        $PageParagraphFileName = Join-Path -Path $PagePath -ChildPath "$($CleansedPageParagraph.TrimEnd()).md"
+                        $PageParagraphs[$PageParagraph].TrimEnd() | Out-File -FilePath $PageParagraphFileName -Encoding utf8
+                    }
+                }
+
+                If ($DelimiterPrinted){
                     Write-Output "--------"
-                    $DelimiterPrinted=$True
+                    Write-Output " "
                 }
-            }
-                
-            # Convert the page to markdown
-            Write-Log "DEBUG" "Converting the page from XML: `"$($Page.Name)`""
-            $ConvertResult = Convert-Page $Page.Name $Page.id $OneNoteOutline $PageStyles ""
-            Write-Log "DEBUG" "Converted the page from XML: `"$($Page.Name)`""
-
-            # Split the page into individual paragraphs and then
-            # write them to individual files.
-            Write-Log "DEBUG" "Splitting the page into paragraphs: `"$($Page.Name)`""
-            $PageParagraphs = Split-Pages -PageMarkdown $ConvertResult.Paragraph -PageName $Page.Name
-            Write-Log "DEBUG" "Split the page into paragraphs: `"$($Page.Name)`""
-
-            ForEach ($PageParagraph in $PageParagraphs.Keys){
-                If ($PrintStructure.IsPresent) {
-                    Write-Output "    * Paragraph Name: ""$($PageParagraph)"""
-                }
-
-                If ($PrintPage){
-                    If (!($DelimiterPrinted)){
-                        Write-Output " "
-                        Write-Output "--------"
-                        $DelimiterPrinted=$True
-                    }
-                    Write-Output("$($PageParagraphs[$PageParagraph])")
-                } ElseIf ($PrintSnippet){
-                    If (!($DelimiterPrinted)){
-                        Write-Output " "
-                        Write-Output "--------"
-                        $DelimiterPrinted=$True
-                    }
-
-                    #Write-Output($($PageParagraphs[$PageParagraph]) -split "`n" | Select-Object -First 3)
-                    $Snippet = $($PageParagraphs[$PageParagraph]).Substring(0, [Math]::Min($($PageParagraphs[$PageParagraph]).Length, 100))
-                    If ($Snippet.Length -eq 100){
-                        $Snippet += "..."
-                    }
-                    Write-Output($Snippet)
-                }
-
-                $CleansedPageParagraph = $PageParagraph -replace $ILLEGAL_CHARACTERS, "_"
-                If ($CleansedPageParagraph -ne $PageParagraph){
-                    Write-Log "INFO" "The paragraph name `"$($PageParagraph)`" contains illegal characters. It has been changed to `"$($CleansedPageParagraph)`"."
-                }
-                
-                If (($ExportAll) -or (($ExportSelected) -and ($Page.Name -eq $ExportedSelected))){
-                    # ONE-2
-                    # Remove illegal characters from the paragraph name, which will then be the file name.
-                    $PageParagraphFileName = Join-Path -Path $PagePath -ChildPath "$($CleansedPageParagraph.TrimEnd()).md"
-                    $PageParagraphs[$PageParagraph].TrimEnd() | Out-File -FilePath $PageParagraphFileName -Encoding utf8
-                }
-            }
-
-            If ($DelimiterPrinted){
-                Write-Output "--------"
-                Write-Output " "
             }
             
         }
