@@ -312,9 +312,8 @@ function Get-Email {
 
     # Check for attachments
     if ($email.Attachments.Count -gt 0) {
-        $EmailMessage += $spacingLeader + "Attachments:`n"
         foreach ($attachment in $email.Attachments) {
-            $EmailMessage += $spacingLeader + " - `"$($attachment.FileName)`"`n"
+            $EmailMessage += $spacingLeader + "  - Attachment: `"$($attachment.FileName)`"`n"
         }
     }
     $EmailMessage += $spacingLeader + "--END EMAIL MESSAGE---------------------`n"
