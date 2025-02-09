@@ -15,7 +15,7 @@
 .NOTES
 - Export_Notebooks does not validate the e_structure_ of the notes. It will faithfully reproduce the structure of the note into Markdown, such as starting with a second-level bullet without having a first-level bullet. This ig the garbage-in, garbage-out maxim.
 - Export_Notebooks does not understand all HTML tags. It supports bold, italics, bold+italics, strikethrough, and anchor (links). All other tags are ignored.
-- Export_Notebooks does not make use of all OneNote tags in the XML of a page nor their attributes. There is a loss of metadata when converting from OneNote pages into markdown.
+- Export_Notebooks does not make use of all OneNote tags in the XML of a page nor their attributes. There is a loss of metadata when converting from OneNote pages into Markdown.
 
 .LINK
 #>
@@ -76,9 +76,21 @@ param(
 # Reference: Application interface (OneNote): https://learn.microsoft.com/en-us/office/client-developer/onenote/application-interface-onenote
 
 # -----------------------------------------------------------------------------
-# Constants
+# Types
 
-$ILLEGAL_CHARACTERS = "[{0}]" -f ([RegEx]::Escape([String][System.IO.Path]::GetInvalidFileNameChars()))
+# Because we're limited to Windows PowerShell 5, dictionaries do not preserve
+# the order of insertions. This means that paragraphs within notes will not be
+# generated in the order that they appear in the note. To work around this, we
+# load the OrderedDictionary class from .NET. Note that the method 
+# "ContainsKey" is replaced by the method "Contains". Otherwise, it operates
+# in the same manner.
+
+# It could be pointed out that the results will be made into files, which the
+# OS will then sort in "correct" order, but we don't want to depend upon the OS.
+Add-Type -TypeDefinition @"
+using System.Collections.Specialized;
+public class MyOrderedDict : OrderedDictionary {}
+"@
 
 # -----------------------------------------------------------------------------
 # Reference values
@@ -305,17 +317,18 @@ function Get-Email {
     $sender = $email.SenderName
 
     # Output the email details
+    $EmailMessage += $spacingLeader + "--BEGIN EMAIL MESSAGE-------------------`n"
     $EmailMessage += $spacingLeader + "Subject: $subject`n"
     $EmailMessage += $spacingLeader + "Sender: $sender`n"
     $EmailMessage += $spacingLeader + "Body: $body`n"
 
     # Check for attachments
     if ($email.Attachments.Count -gt 0) {
-        $EmailMessage += "Attachments:`n"
         foreach ($attachment in $email.Attachments) {
-            $EmailMessage += " - $($attachment.FileName)`n"
+            $EmailMessage += $spacingLeader + "  - Attachment: `"$($attachment.FileName)`"`n"
         }
     }
+    $EmailMessage += $spacingLeader + "--END EMAIL MESSAGE---------------------`n"
 
     # Clean up
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($email) | Out-Null
@@ -346,7 +359,7 @@ function Count-Tags {
 # -----------------------------------------------------------------------------
 
 # Convert-Page is a recursive function that will descend the XML tree of a OneNote page and convert 
-# it to markdown.
+# it to Markdown.
 function Convert-Page {
     param (
         $PageName,
@@ -360,7 +373,7 @@ function Convert-Page {
         $BulletLevel = 0,
         $AllNodeCount = 0, # The total number of nodes in the XML document
         $SumNodeCount = 0, # The sum of all nodes traversed
-        $ProgressCounterDelay = 10
+        $ProgressCounterDelay = 0
         )
         [String]$Paragraph = ""
         [int]$Bullet = $BulletLevel
@@ -369,6 +382,12 @@ function Convert-Page {
     If ($AllNodeCount -eq 0){
         $AllNodeCount = Count-Tags $PageNode
         Write-Log "DEBUG" "AllNodeCount: $AllNodeCount"
+    }
+
+    # If the ProgressCounterDelay is zero, then set it to 5% of the total number of nodes. 5% is a 
+    # compromise between updating the progress bar too frequently and not frequently enough.
+    If ($ProgressCounterDelay -eq 0){
+        $ProgressCounterDelay = [int]($AllNodeCount * 0.05)
     }
         
     $SumNodeCount += 1
@@ -395,22 +414,28 @@ function Convert-Page {
 
     } ElseIf ($PageNode.Name -eq "one:Image"){
 
-        $Paragraph = "{Image: ""$($PageNode.alt)""}`n"
+        # Only include the alt text of the image if it is available.
+        If ($PageNode.alt){
+            $Paragraph = "{Image: ""$($PageNode.alt)""}`n"
+        }
         
     } ElseIf ($PageNode.Name -eq "one:InsertedFile" ) {
 
-        $Paragraph = "{File: ""$($PageNode.preferredName)"""
-        If ($PageNode.pathSource) {
-            $Paragraph += ", originally located at ""$($PageNode.pathSource)"""
-        }
-        $Paragraph += "}`n"
+        # Only include the file name and the original location of the file if they are available.
+        If ($PageNode.preferredName){
+            $Paragraph = "{File: ""$($PageNode.preferredName)"""
+            If ($PageNode.pathSource) {
+                $Paragraph += ", originally located at ""$($PageNode.pathSource)"""
+            }
+            $Paragraph += "}`n"
 
-        If ( [System.Io.Path]::GetExtension($PageNode.preferredName) -eq ".msg" ){
-            # Email message
-            If (Test-Path $PageNode.pathCache) {
-                $EmailMessage = Get-Email -emailFilePath $PageNode.pathCache -spacingLeader "  "
-                If ($EmailMessage) {
-                    $Paragraph += $EmailMessage
+            If ( [System.Io.Path]::GetExtension($PageNode.preferredName) -eq ".msg" ){
+                # Email message
+                If (Test-Path $PageNode.pathCache) {
+                    $EmailMessage = Get-Email -emailFilePath $PageNode.pathCache -spacingLeader "    "
+                    If ($EmailMessage) {
+                        $Paragraph += $EmailMessage
+                    }
                 }
             }
         }
@@ -422,7 +447,7 @@ function Convert-Page {
         # Only actual text that is typed into OneNote appears in ![CDATA] sections.
 
         If ($PageNode.Value.trim() -ne "") {
-            If ($ToMarkdown.IsPresent){
+            If ($Markdown.IsPresent){
                 # We'll replace bold, italics, strikethrough, and links.
                 # All other HTML tags will be removed. This includes but isn't limited to:
                 #   - Font name 
@@ -431,7 +456,7 @@ function Convert-Page {
 
                 $PageText = FormatHTMLTo-Markdown -Text $PageNode.Value.trim()
 
-            } ElseIf ($WithHTML.IsPresent) {
+            } ElseIf ($HTML.IsPresent) {
                 $PageText = $PageNode.Value.trim()
 
             } Else { 
@@ -517,14 +542,21 @@ function Split-Pages {
         $PageName,
         $AllH1Count = 0,
         $SumH1Count = 0,
-        $ProgressCounterDelay = 10
+        $ProgressCounterDelay = 0
     )
 
-    $PageParagraphs = @{}
+    # $PageParagraphs = @{}
+    $PageParagraphs = New-Object MyOrderedDict
 
     If ($AllH1Count -eq 0){
         $AllH1Count = ($PageMarkdown -split "`r?`n" | Select-String "^# ").Count
         Write-Log "DEBUG" "AllH1Count: $AllH1Count"
+    }
+
+    # If the ProgressCounterDelay is zero, then set it to 5% of the total number of nodes. 5% is a 
+    # compromise between updating the progress bar too frequently and not frequently enough.
+    If ($ProgressCounterDelay -eq 0){
+        $ProgressCounterDelay = [int]($AllNodeCount * 0.05)
     }
     
     $Lines = $PageMarkdown -split "`r?`n"
@@ -533,17 +565,18 @@ function Split-Pages {
     
     ForEach($Line in $Lines){
         If ($($Line) -match "^# ") {
+            $Line = $Line.TrimEnd()
+            Write-Log "DEBUG" "H1 heading found: `"$($Line)`""
             
             $SumH1Count += 1
             If (($Loglevel -eq "INFO") -or ($LogLevel -eq "DEBUG")){
-                Write-Log "DEBUG" "`$SumH1Count: $SumH1Count, `$AllH1Count: $AllH1Count, `$ProgressCounterDelay: $ProgressCounterDelay"
                 $ProgressCounterDelay += 1
                 If ($ProgressCounterDelay % 2 -eq 0){
                     Write-Progress -Activity "$($PageName)" -Status "Splitting pages" -PercentComplete (($SumH1Count / $AllH1Count) * 100)
                 }
             }
 
-            If ($PageParagraphs.ContainsKey($LastParagraphTitle)){
+            If ($PageParagraphs.Contains($LastParagraphTitle)){
                 $PageParagraphs[$LastParagraphTitle] += "$($LastParagraph)"
                 
             } Else {
@@ -559,14 +592,24 @@ function Split-Pages {
             
            $LastParagraph=""
 
+            # [1] is the leading hash mark, [2] is the leading whitespace and potential bullet(s),
+            # and [3] is the title.
             $TitleLine = $Line -match "^(# )([\s]*?[\*+-]*[\s]*)(.*)$"
+            $NoDateMatch = "$($Matches[2])$($Matches[3])"
             If ($matches[3]){
+                # There is NO guarantee that what we have is a date. NONE. So,
+                # we'll try to convert it a few different ways. If that's not
+                # successful, then we'll just use it as-is.
                 $LastParagraphTitle = $Matches[3]
                 
+                # First, let's assume the typical date format of
+                # "dddd, MMMM dd, yyyy" (e.g. Friday, January 01, 2027).
+
                 # + Remove the leading day name, if any, from the expected
                 #   format of "dddd, MMMM dd, yyyy". Occasionally, the wrong
                 #   day is attached to the right date. 
                 $CleanedDate = $LastParagraphTitle -replace "^[^,]+,\s*", ""
+                Write-Log "DEBUG" "Cleaned date (dddd, MMMM dd, yyyy): `"$CleanedDate`""
                 
                 # + If we can recognize the heading as a valid date in the form
                 #   of "MMMM dd, yyyy", then reformat it to "yyyy-MM-dd", which
@@ -578,7 +621,24 @@ function Split-Pages {
                         $LastParagraphTitle = (Get-Date $CleanedDate).ToString("yyyy-MM-dd")
                     } 
                 }
-                catch {}
+                catch {
+                    # Second, let's assume the alternate date format of
+                    # "MMMM dd, yyyy, dddd" (e.g. January 01, 2027, Friday).
+
+                    $CleanedDate = $LastParagraphTitle -replace ",\s*[^,]+$", ""
+                    Write-Log "DEBUG" "Cleaned date (MMMM dd, yyyy, dddd): `"$CleanedDate`""
+                    try{
+                        If ((Get-Date $CleanedDate).ToString("yyyy-MM-dd")){
+                            $LastParagraphTitle = (Get-Date $CleanedDate).ToString("yyyy-MM-dd")
+                        } 
+                    }
+                    catch {
+                        # At this point, it doesn't match either of the date
+                        # formats that we expect, so just use it as-is.
+                        $LastParagraphTitle = $NoDateMatch
+                        Write-Log "DEBUG" "Date not recognized: `"$NoDateMatch`""
+                    }
+                }
             } Else {
                 # + We know that the line is an h1 heading (starts with "^# ")
                 #   but it doesn't match the regular expression above. So, just
@@ -586,10 +646,12 @@ function Split-Pages {
                 # + Note that the "Untitled" section can only occur once, at the
                 #   beginning of the page. After any h1 heading has been 
                 #   encountered, a section will *always* have a name.
-                $LastParagraphTitle = "$($Matches[2])$($Matches[3])"
+                $LastParagraphTitle = $NoDateMatch
             }
 
-            If (!($PageParagraphs.ContainsKey($LastParagraphTitle))) {
+            Write-Log "DEBUG" "Determined `$LastParagraphTitle: `"$LastParagraphTitle`""
+
+            If (!($PageParagraphs.Contains($LastParagraphTitle))) {
                 try {
                     $LastParagraph = "# " + (Get-Date $LastParagraphTitle).ToString("dddd, MMMM dd, yyyy") +"`n"
                 } 
@@ -610,7 +672,7 @@ function Split-Pages {
     #   buffer without adding them. So, look in $LastParagraph and see if any
     #   lines need to be added.
     If ($LastParagraph) {
-        If ($PageParagraphs.ContainsKey($LastParagraphTitle)){
+        If ($PageParagraphs.Contains($LastParagraphTitle)){
             $PageParagraphs[$LastParagraphTitle] += "$($LastParagraph)"
         } Else {
             If ($LastParagraphTitle -eq ""){
@@ -729,19 +791,23 @@ Write-Log "DEBUG" "After parameter logic: Markdown: $Markdown"
 Write-Log "DEBUG" "After parameter logic: PlainText: $PlainText"
 Write-Log "DEBUG" "After parameter logic: HTML: $HTML"
 
+$ILLEGAL_CHARACTERS = "[\\\/\:\*\?\`"\<\>\|]" 
+Write-Log "DEBUG" "Illegal characters: `"$ILLEGAL_CHARACTERS`""
+$IllegalCharactersInHex = ($PotentialIllegalCharacters | ForEach-Object { "{0:X}" -f [int]$_ }) -join ","
+Write-Log "DEBUG" "Illegal characters in hex: `"$IllegalCharactersInHex`""
+
 # NoDirCreation overrides the ExportDir parameter, if ExportDir is specified.
 If (!$NoDirCreation){
     If ($ExportDir){
         If (!(Test-Path -Path $ExportDir -PathType Container)) {
-            Write-Log "INFO" "The specified export directory does not exist. Creating it."
-            New-Item -Path $ExportDir -ItemType Directory | Out-Null
+            Write-Log "ERROR" "The specified export directory does not exist."
+            Exit 1
         }
     } Else {
         Write-Log("INFO", "No export directory specified. Defaulting to the current directory.")
         $ExportDir = "."
     }
 }
-
 
 # Ensure that the notebook directory is valid. A null value is acceptable.
 If ($NotebookDir){
@@ -836,8 +902,11 @@ ForEach($Notebook in $NotebooksXML.Notebooks.Notebook)
             [xml]$PageXML = ""
             $OneNoteApp.GetPageContent($Page.ID, [ref]$PageXML, [Microsoft.Office.Interop.OneNote.PageInfo]::piBasic, $OneNoteVersion)
             Write-Log "DEBUG" "Got the content of the page: `"$($Page.Name)`""
-
+            
             $DelimiterPrinted = $False
+
+            # It is possible that a page is empty, but even empty pages still have a defined style
+            # for the page title. This is a good check for the validity of the page.
 
             # The styles can be uniquely defined for each page. Styles are
             # defined in the order that they are first used on the page. So,
@@ -865,102 +934,104 @@ ForEach($Notebook in $NotebooksXML.Notebooks.Notebook)
                 Write-Output " "
             }    
 
-            # Tags are optional. There might not be any on the page.
-            Write-Log "DEBUG" "Finding the tags of the page: `"$($Page.Name)`""
-            $Tags = @{}
-            $Tags = Get-Tags $PageXML.DocumentElement
-            Write-Log "DEBUG" "Found the tags of the page: `"$($Page.Name)`""
-            
-            If ($PrintTags){
-                If (!($DelimiterPrinted)){
-                    Write-Output " "
-                    Write-Output "--------"
-                    $DelimiterPrinted=$True
-                }
-                Write-Output "  + Tags"
-                ForEach( $Key in $Tags.Keys) {
-                    Write-Output "    - $($Key): $($Tags[$Key])"
-                }
-                Write-Output " "
-            }     
- 
-            # TODO
-            # Do something with the tags. For now, we just have the code 
-            # that collects them.
-            
             # Start at the beginning of the content, which is the first Outline node. There
             # can be multiple Outline nodes, but we're only interested in the first one.
             Write-Log "DEBUG" "Finding the first outline node of the page: `"$($Page.Name)`""
             [System.Xml.XmlElement]$OneNoteOutline = Find-OneNoteOutline $PageXML.DocumentElement 6
-            If (!($OneNoteOutline)){
-                Write-Log "ERROR" "Could not find the first outline node of the page: `"$($Page.Name)`""
-                Exit 1
-            }
-            Write-Log "DEBUG" "Found the first outline node of the page: `"$($Page.Name)`""
-            $DelimiterPrinted = $False
             
-            If (($PrintSnippet) -or ($PrintPage)){
-                If (!($DelimiterPrinted)){
-                    Write-Output " "
+            If (!($OneNoteOutline)){
+                Write-Log "INFO" "Could not find the first outline node of the page: `"$($Page.Name)`". The page is considered empty and will be ignored."
+            } Else {
+                Write-Log "DEBUG" "Found the first outline node of the page: `"$($Page.Name)`""
+                
+                # Tags are optional. There might not be any on the page.
+                # It's possible that a page is empty and it's not an error to check for tags, but an
+                # empty page will never have tags so we don't check unless the page has some
+                # content. This is a performance optimization.
+                Write-Log "DEBUG" "Finding the tags of the page: `"$($Page.Name)`""
+                $Tags = @{}
+                $Tags = Get-Tags $PageXML.DocumentElement
+                Write-Log "DEBUG" "Found the tags of the page: `"$($Page.Name)`""
+                
+                If ($PrintTags){
+                    If ($Tags.Keys.Count -gt 0){
+                        If (!($DelimiterPrinted)){
+                            Write-Output " "
+                            Write-Output "--------"
+                            $DelimiterPrinted=$True
+                        }
+                        Write-Output "  + Tags"
+                        ForEach( $Key in $Tags.Keys) {
+                            Write-Output "    - $($Key): $($Tags[$Key])"
+                        }
+                        Write-Output " "
+                    }
+                }     
+     
+                
+                If (($PrintSnippet) -or ($PrintPage)){
+                    If (!($DelimiterPrinted)){
+                        Write-Output " "
+                        Write-Output "--------"
+                        $DelimiterPrinted=$True
+                    }
+                }
+                    
+                # Convert the page to Markdown
+                Write-Log "DEBUG" "Converting the page from XML: `"$($Page.Name)`""
+                $ConvertResult = Convert-Page $Page.Name $Page.id $OneNoteOutline $PageStyles ""
+                Write-Log "DEBUG" "Converted the page from XML: `"$($Page.Name)`""
+
+                # Split the page into individual paragraphs and then
+                # write them to individual files.
+                Write-Log "DEBUG" "Splitting the page into paragraphs: `"$($Page.Name)`""
+                $PageParagraphs = Split-Pages -PageMarkdown $ConvertResult.Paragraph -PageName $Page.Name
+                Write-Log "DEBUG" "Split the page into paragraphs: `"$($Page.Name)`""
+
+                ForEach ($PageParagraph in $PageParagraphs.Keys){
+                    If ($PrintStructure.IsPresent) {
+                        Write-Output "    * Paragraph Name: ""$($PageParagraph)"""
+                    }
+
+                    If ($PrintPage){
+                        If (!($DelimiterPrinted)){
+                            Write-Output " "
+                            Write-Output "--------"
+                            $DelimiterPrinted=$True
+                        }
+                        Write-Output("$($PageParagraphs[$PageParagraph])")
+                    } ElseIf ($PrintSnippet){
+                        If (!($DelimiterPrinted)){
+                            Write-Output " "
+                            Write-Output "--------"
+                            $DelimiterPrinted=$True
+                        }
+
+                        #Write-Output($($PageParagraphs[$PageParagraph]) -split "`n" | Select-Object -First 3)
+                        $Snippet = $($PageParagraphs[$PageParagraph]).Substring(0, [Math]::Min($($PageParagraphs[$PageParagraph]).Length, 100))
+                        If ($Snippet.Length -eq 100){
+                            $Snippet += "..."
+                        }
+                        Write-Output($Snippet)
+                    }
+
+                    $CleansedPageParagraph = $PageParagraph -replace $ILLEGAL_CHARACTERS, "_"
+                    If ($CleansedPageParagraph -ne $PageParagraph){
+                        Write-Log "INFO" "The paragraph name `"$($PageParagraph)`" contains illegal characters. It has been changed to `"$($CleansedPageParagraph)`"."
+                    }
+                    
+                    If (($ExportAll) -or (($ExportSelected) -and ($Page.Name -eq $ExportedSelected))){
+                        # ONE-2
+                        # Remove illegal characters from the paragraph name, which will then be the file name.
+                        $PageParagraphFileName = Join-Path -Path $PagePath -ChildPath "$($CleansedPageParagraph.TrimEnd()).md"
+                        $PageParagraphs[$PageParagraph].TrimEnd() | Out-File -FilePath $PageParagraphFileName -Encoding utf8
+                    }
+                }
+
+                If ($DelimiterPrinted){
                     Write-Output "--------"
-                    $DelimiterPrinted=$True
+                    Write-Output " "
                 }
-            }
-                
-            # Convert the page to markdown
-            Write-Log "DEBUG" "Converting the page from XML: `"$($Page.Name)`""
-            $ConvertResult = Convert-Page $Page.Name $Page.id $OneNoteOutline $PageStyles ""
-            Write-Log "DEBUG" "Converted the page from XML: `"$($Page.Name)`""
-
-            # Split the page into individual paragraphs and then
-            # write them to individual files.
-            Write-Log "DEBUG" "Splitting the page into paragraphs: `"$($Page.Name)`""
-            $PageParagraphs = Split-Pages -PageMarkdown $ConvertResult.Paragraph -PageName $Page.Name
-            Write-Log "DEBUG" "Split the page into paragraphs: `"$($Page.Name)`""
-
-            ForEach ($PageParagraph in $PageParagraphs.Keys){
-                If ($PrintStructure.IsPresent) {
-                    Write-Output "    * Paragraph Name: ""$($PageParagraph)"""
-                }
-
-                If ($PrintPage){
-                    If (!($DelimiterPrinted)){
-                        Write-Output " "
-                        Write-Output "--------"
-                        $DelimiterPrinted=$True
-                    }
-                    Write-Output("$($PageParagraphs[$PageParagraph])")
-                } ElseIf ($PrintSnippet){
-                    If (!($DelimiterPrinted)){
-                        Write-Output " "
-                        Write-Output "--------"
-                        $DelimiterPrinted=$True
-                    }
-
-                    #Write-Output($($PageParagraphs[$PageParagraph]) -split "`n" | Select-Object -First 3)
-                    $Snippet = $($PageParagraphs[$PageParagraph]).Substring(0, [Math]::Min($($PageParagraphs[$PageParagraph]).Length, 100))
-                    If ($Snippet.Length -eq 100){
-                        $Snippet += "..."
-                    }
-                    Write-Output($Snippet)
-                }
-
-                $CleansedPageParagraph = $PageParagraph -replace $ILLEGAL_CHARACTERS, "_"
-                If ($CleansedPageParagraph -ne $PageParagraph){
-                    Write-Log "INFO" "The paragraph name `"$($PageParagraph)`" contains illegal characters. It has been changed to `"$($CleansedPageParagraph)`"."
-                }
-                
-                If (($ExportAll) -or (($ExportSelected) -and ($Page.Name -eq $ExportedSelected))){
-                    # ONE-2
-                    # Remove illegal characters from the paragraph name, which will then be the file name.
-                    $PageParagraphFileName = Join-Path -Path $PagePath -ChildPath "$($CleansedPageParagraph.TrimEnd()).md"
-                    $PageParagraphs[$PageParagraph].TrimEnd() | Out-File -FilePath $PageParagraphFileName -Encoding utf8
-                }
-            }
-
-            If ($DelimiterPrinted){
-                Write-Output "--------"
-                Write-Output " "
             }
             
         }
