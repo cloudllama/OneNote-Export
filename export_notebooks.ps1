@@ -15,7 +15,7 @@
 .NOTES
 - Export_Notebooks does not validate the e_structure_ of the notes. It will faithfully reproduce the structure of the note into Markdown, such as starting with a second-level bullet without having a first-level bullet. This ig the garbage-in, garbage-out maxim.
 - Export_Notebooks does not understand all HTML tags. It supports bold, italics, bold+italics, strikethrough, and anchor (links). All other tags are ignored.
-- Export_Notebooks does not make use of all OneNote tags in the XML of a page nor their attributes. There is a loss of metadata when converting from OneNote pages into markdown.
+- Export_Notebooks does not make use of all OneNote tags in the XML of a page nor their attributes. There is a loss of metadata when converting from OneNote pages into Markdown.
 
 .LINK
 #>
@@ -78,7 +78,6 @@ param(
 # -----------------------------------------------------------------------------
 # Constants
 
-$ILLEGAL_CHARACTERS = "[{0}]" -f ([RegEx]::Escape([String][System.IO.Path]::GetInvalidFileNameChars()))
 
 # -----------------------------------------------------------------------------
 # Reference values
@@ -347,7 +346,7 @@ function Count-Tags {
 # -----------------------------------------------------------------------------
 
 # Convert-Page is a recursive function that will descend the XML tree of a OneNote page and convert 
-# it to markdown.
+# it to Markdown.
 function Convert-Page {
     param (
         $PageName,
@@ -748,6 +747,12 @@ Write-Log "DEBUG" "After parameter logic: Markdown: $Markdown"
 Write-Log "DEBUG" "After parameter logic: PlainText: $PlainText"
 Write-Log "DEBUG" "After parameter logic: HTML: $HTML"
 
+# $ILLEGAL_CHARACTERS = "[{0}]" -f ([RegEx]::Escape([String]$PotentialIllegalCharacters))
+$ILLEGAL_CHARACTERS = "[\\\/\:\*\?\`"\<\>\|]" 
+Write-Log "DEBUG" "Illegal characters: `"$ILLEGAL_CHARACTERS`""
+$IllegalCharactersInHex = ($PotentialIllegalCharacters | ForEach-Object { "{0:X}" -f [int]$_ }) -join ","
+Write-Log "DEBUG" "Illegal characters in hex: `"$IllegalCharactersInHex`""
+
 # NoDirCreation overrides the ExportDir parameter, if ExportDir is specified.
 If (!$NoDirCreation){
     If ($ExportDir){
@@ -760,7 +765,6 @@ If (!$NoDirCreation){
         $ExportDir = "."
     }
 }
-
 
 # Ensure that the notebook directory is valid. A null value is acceptable.
 If ($NotebookDir){
@@ -930,7 +934,7 @@ ForEach($Notebook in $NotebooksXML.Notebooks.Notebook)
                     }
                 }
                     
-                # Convert the page to markdown
+                # Convert the page to Markdown
                 Write-Log "DEBUG" "Converting the page from XML: `"$($Page.Name)`""
                 $ConvertResult = Convert-Page $Page.Name $Page.id $OneNoteOutline $PageStyles ""
                 Write-Log "DEBUG" "Converted the page from XML: `"$($Page.Name)`""
