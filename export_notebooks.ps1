@@ -733,8 +733,8 @@ Write-Log "DEBUG" "After parameter logic: HTML: $HTML"
 If (!$NoDirCreation){
     If ($ExportDir){
         If (!(Test-Path -Path $ExportDir -PathType Container)) {
-            Write-Log "INFO" "The specified export directory does not exist. Creating it."
-            New-Item -Path $ExportDir -ItemType Directory | Out-Null
+            Write-Log "ERROR" "The specified export directory does not exist."
+            Exit 1
         }
     } Else {
         Write-Log("INFO", "No export directory specified. Defaulting to the current directory.")
