@@ -434,7 +434,7 @@ function Convert-Page {
         # Only actual text that is typed into OneNote appears in ![CDATA] sections.
 
         If ($PageNode.Value.trim() -ne "") {
-            If ($ToMarkdown.IsPresent){
+            If ($Markdown.IsPresent){
                 # We'll replace bold, italics, strikethrough, and links.
                 # All other HTML tags will be removed. This includes but isn't limited to:
                 #   - Font name 
@@ -443,7 +443,7 @@ function Convert-Page {
 
                 $PageText = FormatHTMLTo-Markdown -Text $PageNode.Value.trim()
 
-            } ElseIf ($WithHTML.IsPresent) {
+            } ElseIf ($HTML.IsPresent) {
                 $PageText = $PageNode.Value.trim()
 
             } Else { 
@@ -747,7 +747,6 @@ Write-Log "DEBUG" "After parameter logic: Markdown: $Markdown"
 Write-Log "DEBUG" "After parameter logic: PlainText: $PlainText"
 Write-Log "DEBUG" "After parameter logic: HTML: $HTML"
 
-# $ILLEGAL_CHARACTERS = "[{0}]" -f ([RegEx]::Escape([String]$PotentialIllegalCharacters))
 $ILLEGAL_CHARACTERS = "[\\\/\:\*\?\`"\<\>\|]" 
 Write-Log "DEBUG" "Illegal characters: `"$ILLEGAL_CHARACTERS`""
 $IllegalCharactersInHex = ($PotentialIllegalCharacters | ForEach-Object { "{0:X}" -f [int]$_ }) -join ","
