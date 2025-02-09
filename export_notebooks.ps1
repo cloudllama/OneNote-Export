@@ -313,7 +313,7 @@ function Get-Email {
     if ($email.Attachments.Count -gt 0) {
         $EmailMessage += "Attachments:`n"
         foreach ($attachment in $email.Attachments) {
-            $EmailMessage += " - $($attachment.FileName)`n"
+            $EmailMessage += " - `"$($attachment.FileName)`"`n"
         }
     }
 
