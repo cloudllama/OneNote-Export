@@ -305,17 +305,19 @@ function Get-Email {
     $sender = $email.SenderName
 
     # Output the email details
+    $EmailMessage += $spacingLeader + "--BEGIN EMAIL MESSAGE-------------------`n"
     $EmailMessage += $spacingLeader + "Subject: $subject`n"
     $EmailMessage += $spacingLeader + "Sender: $sender`n"
     $EmailMessage += $spacingLeader + "Body: $body`n"
 
     # Check for attachments
     if ($email.Attachments.Count -gt 0) {
-        $EmailMessage += "Attachments:`n"
+        $EmailMessage += $spacingLeader + "Attachments:`n"
         foreach ($attachment in $email.Attachments) {
-            $EmailMessage += " - `"$($attachment.FileName)`"`n"
+            $EmailMessage += $spacingLeader + " - `"$($attachment.FileName)`"`n"
         }
     }
+    $EmailMessage += $spacingLeader + "--END EMAIL MESSAGE---------------------`n"
 
     # Clean up
     [System.Runtime.Interopservices.Marshal]::ReleaseComObject($email) | Out-Null
@@ -408,7 +410,7 @@ function Convert-Page {
         If ( [System.Io.Path]::GetExtension($PageNode.preferredName) -eq ".msg" ){
             # Email message
             If (Test-Path $PageNode.pathCache) {
-                $EmailMessage = Get-Email -emailFilePath $PageNode.pathCache -spacingLeader "  "
+                $EmailMessage = Get-Email -emailFilePath $PageNode.pathCache -spacingLeader "    "
                 If ($EmailMessage) {
                     $Paragraph += $EmailMessage
                 }
