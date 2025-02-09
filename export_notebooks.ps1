@@ -76,8 +76,21 @@ param(
 # Reference: Application interface (OneNote): https://learn.microsoft.com/en-us/office/client-developer/onenote/application-interface-onenote
 
 # -----------------------------------------------------------------------------
-# Constants
+# Types
 
+# Because we're limited to Windows PowerShell 5, dictionaries do not preserve
+# the order of insertions. This means that paragraphs within notes will not be
+# generated in the order that they appear in the note. To work around this, we
+# load the OrderedDictionary class from .NET. Note that the method 
+# "ContainsKey" is replaced by the method "Contains". Otherwise, it operates
+# in the same manner.
+
+# It could be pointed out that the results will be made into files, which the
+# OS will then sort in "correct" order, but we don't want to depend upon the OS.
+Add-Type -TypeDefinition @"
+using System.Collections.Specialized;
+public class MyOrderedDict : OrderedDictionary {}
+"@
 
 # -----------------------------------------------------------------------------
 # Reference values
@@ -532,7 +545,8 @@ function Split-Pages {
         $ProgressCounterDelay = 0
     )
 
-    $PageParagraphs = @{}
+    # $PageParagraphs = @{}
+    $PageParagraphs = New-Object MyOrderedDict
 
     If ($AllH1Count -eq 0){
         $AllH1Count = ($PageMarkdown -split "`r?`n" | Select-String "^# ").Count
@@ -551,17 +565,18 @@ function Split-Pages {
     
     ForEach($Line in $Lines){
         If ($($Line) -match "^# ") {
+            $Line = $Line.TrimEnd()
+            Write-Log "DEBUG" "H1 heading found: `"$($Line)`""
             
             $SumH1Count += 1
             If (($Loglevel -eq "INFO") -or ($LogLevel -eq "DEBUG")){
-                Write-Log "DEBUG" "`$SumH1Count: $SumH1Count, `$AllH1Count: $AllH1Count, `$ProgressCounterDelay: $ProgressCounterDelay"
                 $ProgressCounterDelay += 1
                 If ($ProgressCounterDelay % 2 -eq 0){
                     Write-Progress -Activity "$($PageName)" -Status "Splitting pages" -PercentComplete (($SumH1Count / $AllH1Count) * 100)
                 }
             }
 
-            If ($PageParagraphs.ContainsKey($LastParagraphTitle)){
+            If ($PageParagraphs.Contains($LastParagraphTitle)){
                 $PageParagraphs[$LastParagraphTitle] += "$($LastParagraph)"
                 
             } Else {
@@ -577,14 +592,24 @@ function Split-Pages {
             
            $LastParagraph=""
 
+            # [1] is the leading hash mark, [2] is the leading whitespace and potential bullet(s),
+            # and [3] is the title.
             $TitleLine = $Line -match "^(# )([\s]*?[\*+-]*[\s]*)(.*)$"
+            $NoDateMatch = "$($Matches[2])$($Matches[3])"
             If ($matches[3]){
+                # There is NO guarantee that what we have is a date. NONE. So,
+                # we'll try to convert it a few different ways. If that's not
+                # successful, then we'll just use it as-is.
                 $LastParagraphTitle = $Matches[3]
                 
+                # First, let's assume the typical date format of
+                # "dddd, MMMM dd, yyyy" (e.g. Friday, January 01, 2027).
+
                 # + Remove the leading day name, if any, from the expected
                 #   format of "dddd, MMMM dd, yyyy". Occasionally, the wrong
                 #   day is attached to the right date. 
                 $CleanedDate = $LastParagraphTitle -replace "^[^,]+,\s*", ""
+                Write-Log "DEBUG" "Cleaned date (dddd, MMMM dd, yyyy): `"$CleanedDate`""
                 
                 # + If we can recognize the heading as a valid date in the form
                 #   of "MMMM dd, yyyy", then reformat it to "yyyy-MM-dd", which
@@ -596,7 +621,24 @@ function Split-Pages {
                         $LastParagraphTitle = (Get-Date $CleanedDate).ToString("yyyy-MM-dd")
                     } 
                 }
-                catch {}
+                catch {
+                    # Second, let's assume the alternate date format of
+                    # "MMMM dd, yyyy, dddd" (e.g. January 01, 2027, Friday).
+
+                    $CleanedDate = $LastParagraphTitle -replace ",\s*[^,]+$", ""
+                    Write-Log "DEBUG" "Cleaned date (MMMM dd, yyyy, dddd): `"$CleanedDate`""
+                    try{
+                        If ((Get-Date $CleanedDate).ToString("yyyy-MM-dd")){
+                            $LastParagraphTitle = (Get-Date $CleanedDate).ToString("yyyy-MM-dd")
+                        } 
+                    }
+                    catch {
+                        # At this point, it doesn't match either of the date
+                        # formats that we expect, so just use it as-is.
+                        $LastParagraphTitle = $NoDateMatch
+                        Write-Log "DEBUG" "Date not recognized: `"$NoDateMatch`""
+                    }
+                }
             } Else {
                 # + We know that the line is an h1 heading (starts with "^# ")
                 #   but it doesn't match the regular expression above. So, just
@@ -604,10 +646,12 @@ function Split-Pages {
                 # + Note that the "Untitled" section can only occur once, at the
                 #   beginning of the page. After any h1 heading has been 
                 #   encountered, a section will *always* have a name.
-                $LastParagraphTitle = "$($Matches[2])$($Matches[3])"
+                $LastParagraphTitle = $NoDateMatch
             }
 
-            If (!($PageParagraphs.ContainsKey($LastParagraphTitle))) {
+            Write-Log "DEBUG" "Determined `$LastParagraphTitle: `"$LastParagraphTitle`""
+
+            If (!($PageParagraphs.Contains($LastParagraphTitle))) {
                 try {
                     $LastParagraph = "# " + (Get-Date $LastParagraphTitle).ToString("dddd, MMMM dd, yyyy") +"`n"
                 } 
@@ -628,7 +672,7 @@ function Split-Pages {
     #   buffer without adding them. So, look in $LastParagraph and see if any
     #   lines need to be added.
     If ($LastParagraph) {
-        If ($PageParagraphs.ContainsKey($LastParagraphTitle)){
+        If ($PageParagraphs.Contains($LastParagraphTitle)){
             $PageParagraphs[$LastParagraphTitle] += "$($LastParagraph)"
         } Else {
             If ($LastParagraphTitle -eq ""){
