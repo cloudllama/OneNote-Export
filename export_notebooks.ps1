@@ -362,7 +362,7 @@ function Convert-Page {
         $BulletLevel = 0,
         $AllNodeCount = 0, # The total number of nodes in the XML document
         $SumNodeCount = 0, # The sum of all nodes traversed
-        $ProgressCounterDelay = 10
+        $ProgressCounterDelay = 0
         )
         [String]$Paragraph = ""
         [int]$Bullet = $BulletLevel
@@ -371,6 +371,12 @@ function Convert-Page {
     If ($AllNodeCount -eq 0){
         $AllNodeCount = Count-Tags $PageNode
         Write-Log "DEBUG" "AllNodeCount: $AllNodeCount"
+    }
+
+    # If the ProgressCounterDelay is zero, then set it to 5% of the total number of nodes. 5% is a 
+    # compromise between updating the progress bar too frequently and not frequently enough.
+    If ($ProgressCounterDelay -eq 0){
+        $ProgressCounterDelay = [int]($AllNodeCount * 0.05)
     }
         
     $SumNodeCount += 1
@@ -519,7 +525,7 @@ function Split-Pages {
         $PageName,
         $AllH1Count = 0,
         $SumH1Count = 0,
-        $ProgressCounterDelay = 10
+        $ProgressCounterDelay = 0
     )
 
     $PageParagraphs = @{}
@@ -527,6 +533,12 @@ function Split-Pages {
     If ($AllH1Count -eq 0){
         $AllH1Count = ($PageMarkdown -split "`r?`n" | Select-String "^# ").Count
         Write-Log "DEBUG" "AllH1Count: $AllH1Count"
+    }
+
+    # If the ProgressCounterDelay is zero, then set it to 5% of the total number of nodes. 5% is a 
+    # compromise between updating the progress bar too frequently and not frequently enough.
+    If ($ProgressCounterDelay -eq 0){
+        $ProgressCounterDelay = [int]($AllNodeCount * 0.05)
     }
     
     $Lines = $PageMarkdown -split "`r?`n"
