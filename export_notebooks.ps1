@@ -715,9 +715,6 @@ function Split-Pages {
 # If there is any logging level, then allow debug printing.
 If ($v.IsPresent -or $vv.IsPresent -or $vvv.IsPresent -or $vvvv.IsPresent){
     $DebugPreference = "Continue"
-}
-
-If (($v.IsPresent) -or ($vv.IsPresent)){
     $WarningPreference = "Continue"
 }
 
