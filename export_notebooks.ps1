@@ -548,6 +548,12 @@ function Convert-Page {
         }
     }
 
+    If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
+        If ($AllNodeCount -eq $SumNodeCount){
+            Write-Progress -Activity "$($PageName)" -Status "Converting page" -Completed
+        }
+    }
+
     return [PSCustomObject]@{
         Paragraph = $Paragraph
         Bullet = $Bullet
