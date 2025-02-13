@@ -234,17 +234,22 @@ function FormatHTMLTo-Markdown {
     )
     [string] $ReturnText = ""
     
+    write-Log "DEBUG" "Text: $($Text.Substring(0, [Math]::Min($Text.Length, 80)))"
     If ($RemoveNewlines){
         $Text = $Text -replace "(`r`n|`r|`n)", ""
+        Write-Log "DEBUG" "Text after removing newlines: $($Text.Substring(0, [Math]::Min($Text.Length, 80)))"
     }
 
     $OpeningTagRegex = "^([^<]*?)(<[^/][^>]+?>)(.*)$"
     If ($Text -match $OpeningTagRegex){
+        write-Log "DEBUG" "Opening tag found (first time)"
         do {
             $OpeningText = $matches[1]
             $OpeningTag = $matches[2]
             $RemainingOpeningText = $matches[3]
-            
+            Write-Log "DEBUG" "`$OpeningText: `"($OpeningText.Substring(0, [Math]::Min($OpeningText.Length, 80)))`""
+            Write-Log "DEBUG" "`$OpeningTag: `"($OpeningTag.Substring(0, [Math]::Min($OpeningTag.Length, 80)))`""
+            Write-Log "DEBUG" "`$RemainingOpeningText: `"($RemainingOpeningText.Substring(0, [Math]::Min($RemainingOpeningText.Length, 80)))`""
 
             [string] $ConvertedText = ""
             $ConvertedText = FormatHTMLTo-Markdown -Text $RemainingOpeningText -RemoveNewlines $False
@@ -268,34 +273,43 @@ function FormatHTMLTo-Markdown {
             $StrikethroughRegex = "style='text-decoration:line-through'"
 
             If (($OpeningTag -match $BoldRegex) -and ($OpeningTag -match $ItalicRegex)) {
+                Write-Log "DEBUG" "Bold and italic tags found"
                 $ReturnText += $OpeningText + "___" + $BeforeClosingText + "___"
 
             } ElseIf ($OpeningTag -match $BoldRegex) {
+                Write-Log "DEBUG" "Bold tag found"
                 $ReturnText += $OpeningText + "__" + $BeforeClosingText + "__"
 
             } ElseIf ($OpeningTag -match $ItalicRegex) {
+                Write-Log "DEBUG" "Italic tag found"
                 $ReturnText += $OpeningText + "_" + $BeforeClosingText + "_"
 
             } ElseIf ($OpeningTag -match $LinkRegex) {
+                Write-Log "DEBUG" "Link tag found"
                 $ReturnText += $OpeningText + "[" + $BeforeClosingText + "]" + "(" + $matches[2] + ")"
 
             } ElseIf ($OpeningTag -match $StrikethroughRegex){
+                Write-Log "DEBUG" "Strikethrough tag found"
                 $ReturnText += $OpeningText + "~~" + $BeforeClosingText + "~~"
 
             } Else {
                 # We don't care about any other tags, so remove them
+                Write-Log "DEBUG" "Some other tag found; ignoring"
                 $ReturnText += $OpeningText + $BeforeClosingText
             }
 
             $Text = $RemainingClosingText
+            Write-Log "DEBUG" "Text after processing: $($Text.Substring(0, [Math]::Min($Text.Length, 80)))"
         } while ($Text -match $OpeningTagRegex)
 
         $ReturnText += $Text
 
     } Else {
+        Write-Log "DEBUG" "No opening tag found"
         $ReturnText = $Text
     }
 
+    Write-Log "DEBUG" "ReturnText: $($ReturnText.Substring(0, [Math]::Min($ReturnText.Length, 80)))"
     return $ReturnText
 }
 
@@ -402,7 +416,7 @@ function Convert-Page {
     Write-Log "DEBUG" "Node: $($PageNode.Name), SumNodeCount: $SumNodeCount"
 
     If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
-        Write-Log "DEBUG" "`$SumNodeCount: $SumNodeCount, `$AllNodeCount: $AllNodeCount, `$ProgressCounter: $ProgressCounter, `$ProgressCounterDelay: $ProgressCounterDelay"
+        #Write-Log "DEBUG" "`$SumNodeCount: $SumNodeCount, `$AllNodeCount: $AllNodeCount, `$ProgressCounter: $ProgressCounter, `$ProgressCounterDelay: $ProgressCounterDelay"
         $ProgressCounter += 1
         If ($ProgressCounter -gt $ProgressCounterDelay){
             Write-Progress -Activity "$($PageName)" -Status "Converting page" -PercentComplete (($SumNodeCount / $AllNodeCount) * 100)
