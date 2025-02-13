@@ -542,6 +542,12 @@ function Convert-Page {
         $ProgressCounterDelay = $ConvertResult.ProgressCounterDelay
     }
 
+    If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
+        If ($AllNodeCount -eq $SumNodeCount){
+            Write-Progress -Activity "$($PageName)" -Status "Converting page" -Completed
+        }
+    }
+
     return [PSCustomObject]@{
         Paragraph = $Paragraph
         Bullet = $Bullet
@@ -549,6 +555,7 @@ function Convert-Page {
         ProgressCounterDelay = $ProgressCounterDelay
         ProgressCounter = $ProgressCounter
     }
+
 }
 
 # -----------------------------------------------------------------------------
@@ -703,6 +710,12 @@ function Split-Pages {
             } Else {
                 $PageParagraphs.Add($LastParagraphTitle, "$($LastParagraph)")
             }        }
+    }
+
+    If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
+        If ($AllNodeCount -eq $SumNodeCount){
+            Write-Progress -Activity "$($PageName)" -Status "Splitting pages" -Completed
+        }
     }
 
     return $PageParagraphs
