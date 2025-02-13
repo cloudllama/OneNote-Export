@@ -394,16 +394,16 @@ function Convert-Page {
     # If the ProgressCounterDelay is zero, then set it to 5% of the total number of nodes. 5% is a 
     # compromise between updating the progress bar too frequently and not frequently enough.
     If ($ProgressCounterDelay -eq 0){
+        Write-Log "DEBUG" "Setting `$ProgressCounterDelay: $ProgressCounterDelay"
         $ProgressCounterDelay = [int]($AllNodeCount * 0.05)
     }
-    Write-Log "DEBUG" "ProgressCounterDelay: $ProgressCounterDelay"
         
     $SumNodeCount += 1
     Write-Log "DEBUG" "Node: $($PageNode.Name), SumNodeCount: $SumNodeCount"
 
     If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
         Write-Log "DEBUG" "`$SumNodeCount: $SumNodeCount, `$AllNodeCount: $AllNodeCount, `$ProgressCounter: $ProgressCounter, `$ProgressCounterDelay: $ProgressCounterDelay"
-        $ProgressCounterDelay += 1
+        $ProgressCounter += 1
         If ($ProgressCounter -gt $ProgressCounterDelay){
             Write-Progress -Activity "$($PageName)" -Status "Converting page" -PercentComplete (($SumNodeCount / $AllNodeCount) * 100)
             $ProgressCounter = 0
@@ -540,6 +540,12 @@ function Convert-Page {
         $Paragraph += $ConvertResult.Paragraph
         $Bullet = $ConvertResult.Bullet
         $SumNodeCount = $ConvertResult.SumNodeCount
+    }
+
+    If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
+        If ($AllNodeCount -eq $SumNodeCount){
+            Write-Progress -Activity "$($PageName)" -Status "Converting page" -Completed
+        }
     }
 
     If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
