@@ -469,16 +469,20 @@ function Convert-Page {
                 #   - Font size
                 #   - 
 
+                Write-Log "DEBUG" "Converting CDATA to Markdown"
                 $PageText = FormatHTMLTo-Markdown -Text $PageNode.Value.trim()
 
             } ElseIf ($HTML.IsPresent) {
+                Write-Log "DEBUG" "Leaving CDATA as HTML"
                 $PageText = $PageNode.Value.trim()
 
             } Else { 
                 # Default to $PlainText=$True
+                Write-Log "DEBUG" "Remove HTML from CDATA as plain text"
                 $PageText = $PageNode.Value.trim() -replace "<[^>]+>", ""
             }
 
+            Write-Log "DEBUG" "PageText processed: $($PageText.Substring(0, [Math]::Min($PageText.Length, 40)))"
             $Leader = ""
             Write-Log "DEBUG" "StyleName: $StyleName"
             Switch ($StyleName){
@@ -525,7 +529,9 @@ function Convert-Page {
             If (-not $SuppressOneNoteLinks.IsPresent){
                 If ($StyleName -eq "h1"){
                     $HyperlinkToObject = ""
+                    Write-Log "DEBUG" "About to get hyperlink to object because it is an h1 header"
                     $OneNoteApp.GetHyperLinkToObject( $PageID, $ObjectID, [ref]$HyperlinkToObject)
+                    Write-Log "DEBUG" "Hyperlink to object: $HyperlinkToObject.substring(0, [Math]::Min($HyperlinkToObject.Length, 40))"
                     $PlainPageText = $PageNode.Value.trim() -replace "<[^>]+>", ""
                     $Paragraph += "[$($PlainPageText)]($($HyperlinkToObject))`n"
                     $ObjectID = ""
