@@ -255,54 +255,62 @@ function FormatHTMLTo-Markdown {
             Write-Log "DEBUG" "`$OpeningTag: `"$($OpeningTag.Substring(0, [Math]::Min($OpeningTag.Length, 80)))`""
             Write-Log "DEBUG" "`$RemainingOpeningText: `"$($RemainingOpeningText.Substring(0, [Math]::Min($RemainingOpeningText.Length, 80)))`""
 
-            [string] $ConvertedText = ""
-            $ConvertedText = FormatHTMLTo-Markdown -Text $RemainingOpeningText -RemoveNewlines $False
-            
-            $ClosingTagRegex = "^([^<]*?)(</[^>]+?>)(.*)$"
-            If ($ConvertedText -match $ClosingTagRegex) {
-                $BeforeClosingText = $matches[1]
-                # $ClosingTag = $matches[2]
-                $RemainingClosingText = $matches[3]
-            }
-            
-            # Bold tags: <span style='font-weight:bold'> ... </span>
-            # Italic tags: <span style='font-style:italic'> ... </span>
-            # Links: <a href="URL">URL-name</a>
-            # Strikethrough: <span style='text-decoration:line-through'> ... </span>
-            #   - Strikethrough isn't universally supported. It's a markdown extension.
+            # Break tags don't have matching closing tags, so just consume them and don't look for
+            # a closing tag (i.e., "</br>").
+            If ($OpeneningTag.ToLower() -ne "<br>"){
+                [string] $ConvertedText = ""
+                $ConvertedText = FormatHTMLTo-Markdown -Text $RemainingOpeningText -RemoveNewlines $False
+                
+                $ClosingTagRegex = "^([^<]*?)(</[^>]+?>)(.*)$"
+                If ($ConvertedText -match $ClosingTagRegex) {
+                    $BeforeClosingText = $matches[1]
+                    # $ClosingTag = $matches[2]
+                    $RemainingClosingText = $matches[3]
+                }
+                
+                # Bold tags: <span style='font-weight:bold'> ... </span>
+                # Italic tags: <span style='font-style:italic'> ... </span>
+                # Links: <a href="URL">URL-name</a>
+                # Strikethrough: <span style='text-decoration:line-through'> ... </span>
+                #   - Strikethrough isn't universally supported. It's a markdown extension.
 
-            $BoldRegex = "font-weight:[\s]*?bold"
-            $ItalicRegex = "font-style:[\s]*?italic"
-            $LinkRegex = "(<a[\s]*?href="")(.*)("">)"
-            $StrikethroughRegex = "style='text-decoration:line-through'"
+                $BoldRegex = "font-weight:[\s]*?bold"
+                $ItalicRegex = "font-style:[\s]*?italic"
+                $LinkRegex = "(<a[\s]*?href="")(.*)("">)"
+                $StrikethroughRegex = "style='text-decoration:line-through'"
 
-            If (($OpeningTag -match $BoldRegex) -and ($OpeningTag -match $ItalicRegex)) {
-                Write-Log "DEBUG" "Bold and italic tags found"
-                $ReturnText += $OpeningText + "___" + $BeforeClosingText + "___"
+                If (($OpeningTag -match $BoldRegex) -and ($OpeningTag -match $ItalicRegex)) {
+                    Write-Log "DEBUG" "Bold and italic tags found"
+                    $ReturnText += $OpeningText + "___" + $BeforeClosingText + "___"
 
-            } ElseIf ($OpeningTag -match $BoldRegex) {
-                Write-Log "DEBUG" "Bold tag found"
-                $ReturnText += $OpeningText + "__" + $BeforeClosingText + "__"
+                } ElseIf ($OpeningTag -match $BoldRegex) {
+                    Write-Log "DEBUG" "Bold tag found"
+                    $ReturnText += $OpeningText + "__" + $BeforeClosingText + "__"
 
-            } ElseIf ($OpeningTag -match $ItalicRegex) {
-                Write-Log "DEBUG" "Italic tag found"
-                $ReturnText += $OpeningText + "_" + $BeforeClosingText + "_"
+                } ElseIf ($OpeningTag -match $ItalicRegex) {
+                    Write-Log "DEBUG" "Italic tag found"
+                    $ReturnText += $OpeningText + "_" + $BeforeClosingText + "_"
 
-            } ElseIf ($OpeningTag -match $LinkRegex) {
-                Write-Log "DEBUG" "Link tag found"
-                $ReturnText += $OpeningText + "[" + $BeforeClosingText + "]" + "(" + $matches[2] + ")"
+                } ElseIf ($OpeningTag -match $LinkRegex) {
+                    Write-Log "DEBUG" "Link tag found"
+                    $ReturnText += $OpeningText + "[" + $BeforeClosingText + "]" + "(" + $matches[2] + ")"
 
-            } ElseIf ($OpeningTag -match $StrikethroughRegex){
-                Write-Log "DEBUG" "Strikethrough tag found"
-                $ReturnText += $OpeningText + "~~" + $BeforeClosingText + "~~"
+                } ElseIf ($OpeningTag -match $StrikethroughRegex){
+                    Write-Log "DEBUG" "Strikethrough tag found"
+                    $ReturnText += $OpeningText + "~~" + $BeforeClosingText + "~~"
 
+                } Else {
+                    # We don't care about any other tags, so remove them
+                    Write-Log "DEBUG" "Some other tag found; ignoring"
+                    $ReturnText += $OpeningText + $BeforeClosingText
+                }
+
+                $Text = $RemainingClosingText
             } Else {
-                # We don't care about any other tags, so remove them
-                Write-Log "DEBUG" "Some other tag found; ignoring"
-                $ReturnText += $OpeningText + $BeforeClosingText
+                Write-Log "DEBUG" "Break tag found"
+                $Text = $RemainingOpeningText
             }
 
-            $Text = $RemainingClosingText
             Write-Log "DEBUG" "Text after processing: $($Text.Substring(0, [Math]::Min($Text.Length, 80)))"
         } while ($Text -match $OpeningTagRegex)
 
