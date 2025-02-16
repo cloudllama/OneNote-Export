@@ -72,7 +72,10 @@ param(
     [Parameter(Mandatory=$False)]
     [switch] $vvv,
     [Parameter(Mandatory=$False)]
-    [switch] $vvvv
+    [switch] $vvvv,
+
+    [Parameter(Mandatory=$False)]
+    [int] $vDelay
 
 )
 
@@ -248,6 +251,10 @@ function FormatHTMLTo-Markdown {
     If ($Text -match $OpeningTagRegex){
         write-Log "DEBUG" "Opening tag found (first time)"
         do {
+            If ($vDelay){
+                Start-Sleep -Milliseconds $vDelay
+            }
+
             $OpeningText = $matches[1]
             $OpeningTag = $matches[2]
             $RemainingOpeningText = $matches[3]
@@ -412,6 +419,10 @@ function Convert-Page {
         [int]$Bullet = $BulletLevel
         $ObjectID = $LastObjectID
         
+    If ($vDelay){
+        Start-Sleep -Milliseconds $vDelay
+    }
+
     If ($AllNodeCount -eq 0){
         $AllNodeCount = Count-Tags $PageNode
         Write-Log "DEBUG" "AllNodeCount: $AllNodeCount"
@@ -428,10 +439,11 @@ function Convert-Page {
     Write-Log "DEBUG" "Node: $($PageNode.Name), SumNodeCount: $SumNodeCount"
 
     If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
-        #Write-Log "DEBUG" "`$SumNodeCount: $SumNodeCount, `$AllNodeCount: $AllNodeCount, `$ProgressCounter: $ProgressCounter, `$ProgressCounterDelay: $ProgressCounterDelay"
+        Write-Log "DEBUG" "`$SumNodeCount: $SumNodeCount, `$AllNodeCount: $AllNodeCount, `$ProgressCounter: $ProgressCounter, `$ProgressCounterDelay: $ProgressCounterDelay"
         $ProgressCounter += 1
         If ($ProgressCounter -gt $ProgressCounterDelay){
-            Write-Progress -Activity "$($PageName)" -Status "Converting page" -PercentComplete (($SumNodeCount / $AllNodeCount) * 100)
+            Write-Progress -ID 1 -Activity "$($PageName)" -Status "Converting page" -PercentComplete (($SumNodeCount / $AllNodeCount) * 100)
+            Write-Log "DEBUG" "Converting page progress: $(($SumNodeCount / $AllNodeCount) * 100)"
             $ProgressCounter = 0
         }
     }
@@ -572,17 +584,13 @@ function Convert-Page {
         $Paragraph += $ConvertResult.Paragraph
         $Bullet = $ConvertResult.Bullet
         $SumNodeCount = $ConvertResult.SumNodeCount
+        $ProgressCounter = $ConvertResult.ProgressCounter
     }
 
     If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
         If ($AllNodeCount -eq $SumNodeCount){
-            Write-Progress -Activity "$($PageName)" -Status "Converting page" -Completed
-        }
-    }
-
-    If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
-        If ($AllNodeCount -eq $SumNodeCount){
-            Write-Progress -Activity "$($PageName)" -Status "Converting page" -Completed
+            Write-Progress -ID 1 -Activity "$($PageName)" -Status "Converting page" -Completed
+            Write-Log "DEBUG" "Converting page progress: Completed"
         }
     }
 
@@ -625,6 +633,10 @@ function Split-Pages {
     $LastParagraph = ""
     
     ForEach($Line in $Lines){
+        If ( $vDelay){
+            Start-Sleep -Milliseconds $vDelay
+        }
+
         If ($($Line) -match "^# ") {
             $Line = $Line.TrimEnd()
             Write-Log "VERBOSE" "H1 heading: `"$($Line)`""
@@ -633,7 +645,8 @@ function Split-Pages {
             If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
                 $ProgressCounter += 1
                 If ($ProgressCounter -gt $ProgressCounterDelay){
-                    Write-Progress -Activity "$($PageName)" -Status "Splitting pages" -PercentComplete (($SumH1Count / $AllH1Count) * 100)
+                    Write-Progress -ID 2 -Activity "$($PageName)" -Status "Splitting pages" -PercentComplete (($SumH1Count / $AllH1Count) * 100)
+                    Write-Log "DEBUG" "Splitting pages progress: $(($SumH1Count / $AllH1Count) * 100)"
                     $ProgressCounter = 0
                 }
             }
@@ -751,7 +764,8 @@ function Split-Pages {
 
     If (($Loglevel -eq "INFO") -or ($LogLevel -eq "VERBOSE") -or ($LogLevel -eq "DEBUG")){
         If ($AllNodeCount -eq $SumNodeCount){
-            Write-Progress -Activity "$($PageName)" -Status "Splitting pages" -Completed
+            Write-Progress -ID 2 -Activity "$($PageName)" -Status "Splitting pages" -Completed
+            Write-Log "DEBUG" "Splitting pages progress: Completed"
         }
     }
 
@@ -807,6 +821,7 @@ Write-Log -Level "VERBOSE" -Message "v: $v"
 Write-Log -Level "VERBOSE" -Message "vv: $vv"
 Write-Log -Level "VERBOSE" -Message "vvv: $vvv"
 Write-Log -Level "VERBOSE" -Message "vvvv: $vvvv"
+Write-Log -Level "VERBOSE" -Message "vDelay: $vDelay"
 
 # Advanced logic for parameters.
 If ($PSCmdlet.ParameterSetName -eq "Set1") {
