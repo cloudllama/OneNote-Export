@@ -251,9 +251,9 @@ function FormatHTMLTo-Markdown {
             $OpeningText = $matches[1]
             $OpeningTag = $matches[2]
             $RemainingOpeningText = $matches[3]
-            Write-Log "DEBUG" "`$OpeningText: `"($OpeningText.Substring(0, [Math]::Min($OpeningText.Length, 80)))`""
-            Write-Log "DEBUG" "`$OpeningTag: `"($OpeningTag.Substring(0, [Math]::Min($OpeningTag.Length, 80)))`""
-            Write-Log "DEBUG" "`$RemainingOpeningText: `"($RemainingOpeningText.Substring(0, [Math]::Min($RemainingOpeningText.Length, 80)))`""
+            Write-Log "DEBUG" "`$OpeningText: `"$($OpeningText.Substring(0, [Math]::Min($OpeningText.Length, 80)))`""
+            Write-Log "DEBUG" "`$OpeningTag: `"$($OpeningTag.Substring(0, [Math]::Min($OpeningTag.Length, 80)))`""
+            Write-Log "DEBUG" "`$RemainingOpeningText: `"$($RemainingOpeningText.Substring(0, [Math]::Min($RemainingOpeningText.Length, 80)))`""
 
             [string] $ConvertedText = ""
             $ConvertedText = FormatHTMLTo-Markdown -Text $RemainingOpeningText -RemoveNewlines $False
