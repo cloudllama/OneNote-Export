@@ -257,7 +257,7 @@ function FormatHTMLTo-Markdown {
 
             # Break tags don't have matching closing tags, so just consume them and don't look for
             # a closing tag (i.e., "</br>").
-            If ($OpeneningTag.ToLower() -ne "<br>"){
+            If ($OpeningTag.ToLower() -ne "<br>"){
                 [string] $ConvertedText = ""
                 $ConvertedText = FormatHTMLTo-Markdown -Text $RemainingOpeningText -RemoveNewlines $False
                 
