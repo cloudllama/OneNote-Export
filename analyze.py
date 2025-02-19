@@ -383,7 +383,7 @@ def start_chat(llm, retriever, compartment):
             model_id=llm_chat_model["oci"],
             service_endpoint=oci_genai_service_endpoint,
             compartment_id=oci_compartment,
-            model_kwargs={"temperature": 0.8, "max_tokens": 500},
+            model_kwargs={"temperature": 0.8, "max_tokens": 1000},
         )
 
     # -------------
