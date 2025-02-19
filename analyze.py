@@ -68,7 +68,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Script to read in exported OneNote files in Markdown and make them available to query via an LLM")
 
     parser.add_argument("llm", type=str, help="The LLM to use (openai, ollama, oci)")
-    parser.add_argument("docdir", type=str, help="The directory to search for markdown documents")
+    parser.add_argument("--docdir", type=str, help="The directory to search for markdown documents")
+    parser.add_argument("--skipembedding", action="store_true", help="Skip embedding the documents")
     parser.add_argument("--configfile", type=str, help="Location of LLM's configuration file")
     parser.add_argument("--compartment", type=str, help="The OCI compartment to use")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Logging level")
@@ -86,11 +87,10 @@ def parse_args():
     else:
         logging.basicConfig(level=logging.CRITICAL)
 
-
-
     return {
         "llm": args.llm,
         "docdir": args.docdir,
+        "skipembedding": args.skipembedding,
         "configfile": args.configfile,
         "compartment": args.compartment
     }
@@ -102,18 +102,23 @@ def validate_llm(llm):
         sys.exit(1)
 
 # ----------------------------------------------------------------------------------------------------------------------
-def validate_configfile(configfile):
-    if configfile:
-        if (not((configfile) and os.access(configfile, os.R_OK))):
-            logging.error("Invalid config file. Either it does not exist or it cannot be read. File: \"{}\"".format(configfile))
-            sys.exit(1)
+def validate_configfile(configfile, llm):
+    if llm == "oci":
+        # If we're running the LLM on OCI, then validate the configuration file.
+        if configfile:
+            if (not((configfile) and os.access(configfile, os.R_OK))):
+                logging.error("Invalid config file. Either it does not exist or it cannot be read. File: \"{}\"".format(configfile))
+                sys.exit(1)
+            else:
+                logging.info("Reading LLM from \"{}\"".format(configfile))
+                os.environ["OCI_CONFIG_FILE"] = configfile
+                logging.info("OCI_CONFIG_FILE environment variable set to \"{}\"".format(os.environ["OCI_CONFIG_FILE"]))
         else:
-            logging.info("Reading LLM from \"{}\"".format(configfile))
-    else:
-        logging.info("No configuration file passed.")
+            logging.error( "ASSERT: OCI was specified but no configuration file was specified. A configuration file is required.")
+            sys.exit(1)
 
 # ----------------------------------------------------------------------------------------------------------------------
-def setup_llm(llm, compartment_name):
+def setup_llm(llm, configfile, compartment_name):
     oci_compartment = None
 
     if llm == "ollama":
@@ -134,11 +139,9 @@ def setup_llm(llm, compartment_name):
         file must be specified in an environment variable, OCI_CONFIG_FILE. 
         """
         if (not (os.environ.get("OCI_CONFIG_FILE"))):
-            logging.error("OCI_CONFIG_FILE environment variable not set. Default location not allowed.")
+            logging.error("OCI_CONFIG_FILE environment variable not set. It must be set when using OCI.")
             sys.exit(1)
-
-        logging.info("OCI_CONFIG_FILE environmental variable: \"{}\".".format(os.environ.get("OCI_CONFIG_FILE")))
-        oci_config_file = Path(os.environ.get("OCI_CONFIG_FILE"))
+        oci_config_file = Path(configfile)
 
         try:
             full_path_oci_config_file = oci_config_file.resolve()
@@ -229,31 +232,34 @@ def setup_llm(llm, compartment_name):
     }
 
 # ----------------------------------------------------------------------------------------------------------------------
-def read_documents(docdir):
+def read_documents(docdir, skipembedding):
     text_loader_kwargs = {'encoding': 'utf-8'}
 
-    if docdir:
-        full_path_docdir = Path(docdir)
-        if (not((full_path_docdir) and os.access(full_path_docdir, os.R_OK))):
-            logging.error("Invalid document directory. Either it does not exist or it cannot be read. Directory: \"{}\"".format(full_path_docdir))
-            sys.exit(1)
-        else:
-            logging.info("Reading Markdown documents from \"{}\"".format(full_path_docdir))
+    if skipembedding:
+        pass
     else:
-        logging.error("ASSERT: No document directory parameter passed")
-        sys.exit(1)
+        if docdir:
+            full_path_docdir = Path(docdir)
+            if (not((full_path_docdir) and os.access(full_path_docdir, os.R_OK))):
+                logging.error("Invalid document directory. Either it does not exist or it cannot be read. Directory: \"{}\"".format(full_path_docdir))
+                sys.exit(1)
+            else:
+                logging.info("Reading Markdown documents from \"{}\"".format(full_path_docdir))
+        else:
+            logging.error("ASSERT: No document directory parameter passed")
+            sys.exit(1)
 
-    try:
-        loader = DirectoryLoader(full_path_docdir.name, glob="**/*.md", loader_cls=TextLoader, loader_kwargs=text_loader_kwargs)
-        documents = loader.load()
-    except Exception as e:
-        logging.error("Unable to load documents from \"{}\"".format(full_path_docdir))
-        sys.exit(1)
+        try:
+            loader = DirectoryLoader(full_path_docdir.name, glob="**/*.md", loader_cls=TextLoader, loader_kwargs=text_loader_kwargs)
+            documents = loader.load()
+        except Exception as e:
+            logging.error("Unable to load documents from \"{}\"".format(full_path_docdir))
+            sys.exit(1)
 
-    return documents
+        return documents
 
 # ----------------------------------------------------------------------------------------------------------------------
-def enrich_documents(documents):
+def enrich_documents(documents, skipembedding):
     """
     In the directory, the following hierarchy is expected:
     + Top directory
@@ -277,38 +283,44 @@ def enrich_documents(documents):
     What if the 'docdir' parameter points to the Page directory? This means that when walking the directory hierarchy
     from the bottom, the parent of the Page directory is assumed to be the Section directory, which is not guaranteed.
     """
-    for doc in documents:
-        fileName = Path(doc.metadata["source"]).name
-        baseFileName = fileName.removesuffix(".md")
-        parentDir = Path(doc.metadata["source"]).parent
-        pageDir = (Path(parentDir).name).removesuffix(" page")
-        sectionDir = (Path(parentDir).parent.name).removesuffix(" section")
+    if skipembedding:
+        pass
+    else:
+        for doc in documents:
+            fileName = Path(doc.metadata["source"]).name
+            baseFileName = fileName.removesuffix(".md")
+            parentDir = Path(doc.metadata["source"]).parent
+            pageDir = (Path(parentDir).name).removesuffix(" page")
+            sectionDir = (Path(parentDir).parent.name).removesuffix(" section")
 
-        doc.metadata["page"] = pageDir
-        doc.metadata["section"] = sectionDir
+            doc.metadata["page"] = pageDir
+            doc.metadata["section"] = sectionDir
 
-        try:
-            paragraphDate = datetime.strptime(baseFileName, "%Y-%m-%d").strftime("%Y-%m-%d")
-        except ValueError:
-            paragraphDate = ""
+            try:
+                paragraphDate = datetime.strptime(baseFileName, "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                paragraphDate = ""
 
-        if (paragraphDate):
-            doc.metadata["date"] = paragraphDate
-            doc.metadata["paragraph"] = datetime.strptime(baseFileName, "%Y-%m-%d").strftime("%A, %B %d, %Y")
-        else:
-            doc.metadata["date"] = ""
-            doc.metadata["paragraph"] = baseFileName
+            if (paragraphDate):
+                doc.metadata["date"] = paragraphDate
+                doc.metadata["paragraph"] = datetime.strptime(baseFileName, "%Y-%m-%d").strftime("%A, %B %d, %Y")
+            else:
+                doc.metadata["date"] = ""
+                doc.metadata["paragraph"] = baseFileName
 
-    return documents
+        return documents
 
 # ----------------------------------------------------------------------------------------------------------------------
-def store_vector_db(llm, documents, oci_compartment):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_documents(documents)
+def store_vector_db(llm, documents, skipembedding, oci_compartment):
+    if skipembedding:
+        pass
+    else:
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = text_splitter.split_documents(documents)
 
-    logging.info("Total number of chunks: {}".format(len(chunks)))
-    logging.debug("Document types found for \"date\": {}".format(len(set(doc.metadata['date'] for doc in documents))))
-    logging.debug("Document types found for \"paragraph\": {}".format(len(set(doc.metadata['paragraph'] for doc in documents))))
+        logging.info("Total number of chunks: {}".format(len(chunks)))
+        logging.debug("Document types found for \"date\": {}".format(len(set(doc.metadata['date'] for doc in documents))))
+        logging.debug("Document types found for \"paragraph\": {}".format(len(set(doc.metadata['paragraph'] for doc in documents))))
 
     if llm == "ollama":
         embeddings = OllamaEmbeddings(model=llm_embeddings_model[llm])
@@ -330,20 +342,25 @@ def store_vector_db(llm, documents, oci_compartment):
     # Put the chunks of data into a Vector Store that associates a Vector Embedding with each chunk
     # Chroma is a popular open source Vector Database based on SQLLite
 
-    # Delete if already exists
-    if os.path.exists(db_name):
-        Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
+    if skipembedding:
+        vector_db = Chroma(persist_directory=db_name, embedding_function=embeddings)
+    else:
+        # Delete if already exists
+        if os.path.exists(db_name):
+            Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
 
-    # Create vectorstore
-    vector_db = Chroma.from_documents(documents=chunks, embedding=embeddings, persist_directory=db_name)
+        # Create vectorstore
+        vector_db = Chroma.from_documents(documents=chunks, embedding=embeddings, persist_directory=db_name)
+        vector_db.persist()
+        logging.debug("Writing vectordb to \"{}\"".format(db_name))
+
     retriever = vector_db.as_retriever()
 
     vector_db_count = vector_db._collection.count()
     sample_embedding = vector_db._collection.get(limit=1, include=["embeddings"])["embeddings"][0]
     dimensions = len(sample_embedding)
 
-    logging.debug("Writing vectordb to \"{}\"".format(db_name))
-    logging.info("Vectordb created with {} documents.".format(vector_db_count))
+    logging.info("Vectordb has {} documents.".format(vector_db_count))
     logging.debug("Sample embedding dimension: {}".format(dimensions))
 
     return retriever
@@ -424,18 +441,20 @@ if __name__ == "__main__":
 
     all_args = parse_args()
     validate_llm(all_args["llm"])
-    validate_configfile(all_args["configfile"])
-
     llm_model_choice = all_args["llm"]
+
+    configfile = all_args["configfile"]
+    validate_configfile(configfile, llm_model_choice)
+
     oci_compartment_name = all_args["compartment"]
-    llm_setup_results = setup_llm(llm_model_choice, oci_compartment_name)
+    llm_setup_results = setup_llm(llm_model_choice, configfile, oci_compartment_name)
 
     docdir = all_args["docdir"]
-    documents = read_documents(docdir)
-
-    documents = enrich_documents(documents)
+    skipembedding = all_args["skipembedding"]
+    documents = read_documents(docdir, skipembedding)
+    documents = enrich_documents(documents, skipembedding)
 
     oci_compartment = llm_setup_results["oci_compartment"]
-    retriever = store_vector_db(llm_model_choice, documents, oci_compartment)
+    retriever = store_vector_db(llm_model_choice, documents, skipembedding, oci_compartment)
 
     start_chat(llm_model_choice, retriever, oci_compartment)
