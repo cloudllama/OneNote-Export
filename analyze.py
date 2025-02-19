@@ -68,7 +68,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Script to read in exported OneNote files in Markdown and make them available to query via an LLM")
 
     parser.add_argument("llm", type=str, help="The LLM to use (openai, ollama, oci)")
-    parser.add_argument("docdir", type=str, help="The directory to search for markdown documents")
+    parser.add_argument("--docdir", type=str, help="The directory to search for markdown documents")
     parser.add_argument("--configfile", type=str, help="Location of LLM's configuration file")
     parser.add_argument("--compartment", type=str, help="The OCI compartment to use")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Logging level")
@@ -102,18 +102,23 @@ def validate_llm(llm):
         sys.exit(1)
 
 # ----------------------------------------------------------------------------------------------------------------------
-def validate_configfile(configfile):
-    if configfile:
-        if (not((configfile) and os.access(configfile, os.R_OK))):
-            logging.error("Invalid config file. Either it does not exist or it cannot be read. File: \"{}\"".format(configfile))
-            sys.exit(1)
+def validate_configfile(configfile, llm):
+    if llm == "oci":
+        # If we're running the LLM on OCI, then validate the configuration file.
+        if configfile:
+            if (not((configfile) and os.access(configfile, os.R_OK))):
+                logging.error("Invalid config file. Either it does not exist or it cannot be read. File: \"{}\"".format(configfile))
+                sys.exit(1)
+            else:
+                logging.info("Reading LLM from \"{}\"".format(configfile))
+                os.environ["OCI_CONFIG_FILE"] = configfile
+                logging.info("OCI_CONFIG_FILE environment variable set to \"{}\"".format(os.environ["OCI_CONFIG_FILE"]))
         else:
-            logging.info("Reading LLM from \"{}\"".format(configfile))
-    else:
-        logging.info("No configuration file passed.")
+            logging.error( "ASSERT: OCI was specified but no configuration file was specified. A configuration file is required.")
+            sys.exit(1)
 
 # ----------------------------------------------------------------------------------------------------------------------
-def setup_llm(llm, compartment_name):
+def setup_llm(llm, configfile, compartment_name):
     oci_compartment = None
 
     if llm == "ollama":
@@ -134,11 +139,9 @@ def setup_llm(llm, compartment_name):
         file must be specified in an environment variable, OCI_CONFIG_FILE. 
         """
         if (not (os.environ.get("OCI_CONFIG_FILE"))):
-            logging.error("OCI_CONFIG_FILE environment variable not set. Default location not allowed.")
+            logging.error("OCI_CONFIG_FILE environment variable not set. It must be set when using OCI.")
             sys.exit(1)
-
-        logging.info("OCI_CONFIG_FILE environmental variable: \"{}\".".format(os.environ.get("OCI_CONFIG_FILE")))
-        oci_config_file = Path(os.environ.get("OCI_CONFIG_FILE"))
+        oci_config_file = Path(configfile)
 
         try:
             full_path_oci_config_file = oci_config_file.resolve()
@@ -424,11 +427,13 @@ if __name__ == "__main__":
 
     all_args = parse_args()
     validate_llm(all_args["llm"])
-    validate_configfile(all_args["configfile"])
-
     llm_model_choice = all_args["llm"]
+
+    configfile = all_args["configfile"]
+    validate_configfile(configfile, llm_model_choice)
+
     oci_compartment_name = all_args["compartment"]
-    llm_setup_results = setup_llm(llm_model_choice, oci_compartment_name)
+    llm_setup_results = setup_llm(llm_model_choice, configfile, oci_compartment_name)
 
     docdir = all_args["docdir"]
     documents = read_documents(docdir)
